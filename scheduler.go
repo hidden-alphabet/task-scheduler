@@ -209,37 +209,36 @@ func (t *Task) Run() {
       t.Scheduler.TotalTasks -= 1
       break
     default:
-    }
+      log.Printf("[Task] Retrieved a job for a '%s' worker. Distributing.", job.Name)
 
-    log.Printf("[Task] Retrieved a job for a '%s' worker. Distributing.", job.Name)
+      worker := registrar[job.Name]
+      output := worker(job.Context)
 
-    worker := registrar[job.Name]
-    output := worker(job.Context)
+      if output == nil {
+        log.Printf("[Task] Output from worker was empty.")
+        continue
+      }
 
-    if output == nil {
-      log.Printf("[Task] Output from worker was empty.")
-      continue
-    }
+      log.Printf("[Task] Received output from worker.")
 
-    log.Printf("[Task] Received output from worker.")
+      if output.Error != nil {
+        log.Printf("[Task] Worker '%s' generated an error during processing.", job.Name)
+        log.Fatal(output.Error)
+      }
 
-    if output.Error != nil {
-      log.Printf("[Task] Worker '%s' generated an error during processing.", job.Name)
-      log.Fatal(output.Error)
-    }
+      if len(output.Jobs) != 0 {
+        log.Printf("[Task] Worker returned %d jobs. Submitting them for distribution.", len(output.Jobs))
 
-    if len(output.Jobs) != 0 {
-      log.Printf("[Task] Worker returned %d jobs. Submitting them for distribution.", len(output.Jobs))
+        for _, job := range output.Jobs {
+          t.Jobs <- job
+        }
 
-      for _, job := range output.Jobs {
-        t.Jobs <- job
+        t.Scheduler.Tasks <- t
+        t.Scheduler.ActiveTasks -= 1
       }
     }
 
-    log.Printf("[Task] Completed Work.")
-
-    t.Scheduler.Tasks <- t
-    t.Scheduler.ActiveTasks -= 1
+    log.Printf("[Task] Done.")
 	}
 
   log.Printf("[Task] Stopping.")
