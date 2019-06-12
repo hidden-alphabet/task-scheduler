@@ -168,7 +168,7 @@ func (s *Scheduler) Scale(n int) error {
   Register a new worker.
 */
 func (s *Scheduler) RegisterWorker(name string, worker Worker) {
-  log.Printf("[Scheduler] Registered worker '%s'", name)
+  log.Printf("[Scheduler] Registering '%s' Worker.", name)
   s.Registrar[name] = worker
 }
 
@@ -196,7 +196,7 @@ func (s *Scheduler) SubmitJob(job *Job) {
   a job queue.
 */
 func (t *Task) Run() {
-  log.Printf("[Task] Started.")
+  log.Printf("[Task] Starting.")
 
   registrar := t.Scheduler.Registrar
 
@@ -242,5 +242,5 @@ func (t *Task) Run() {
     t.Scheduler.ActiveTasks -= 1
 	}
 
-  log.Printf("[Task] Done.")
+  log.Printf("[Task] Stopping.")
 }
