@@ -1,8 +1,13 @@
 package scheduler
 
 import (
+  "os"
   "log"
   "time"
+)
+
+var (
+  LogFlags = log.Ldate | log.Lmicroseconds | log.Lshortfile
 )
 
 /*
@@ -37,6 +42,8 @@ type Task struct {
   Done        chan bool
   Jobs        chan *Job
 	Scheduler   *Scheduler
+
+  Logger *log.Logger
 }
 
 /*
@@ -54,21 +61,27 @@ type Scheduler struct {
   Registrar map[string]Worker
 
   Done chan bool
+
+  Logger *log.Logger
 }
 
 /*
   Create a new scheduler. 
 */
 func New() (*Scheduler, error) {
-  log.Printf("[Scheduler] Created Scheduler.")
 
   scheduler := &Scheduler{
-    Registrar: make(map[string]Worker),
-    Queue: make(chan *Job, 10),
-    Tasks: make(chan *Task, 1000),
     TotalTasks: 0,
     ActiveTasks: 0,
+
+    Queue: make(chan *Job, 10),
+    Tasks: make(chan *Task, 1000),
+    Registrar: make(map[string]Worker),
+
+    Logger: log.New(os.Stdout, "[Scheduler] ", LogFlags),
   }
+
+  scheduler.Logger.Printf("Created Scheduler.")
 
   go scheduler.Run()
 
@@ -84,27 +97,27 @@ func New() (*Scheduler, error) {
   Start delegating jobs out to workers.
 */
 func (s *Scheduler) Run() error {
-  log.Printf("[Scheduler] Started.")
+  s.Logger.Printf("Started.")
 
   for {
     select {
     case <-s.Done:
-      log.Printf("[Scheduler] Stopping.")
+      s.Logger.Printf("Stopping.")
       break
     case t := <-s.Tasks:
-      log.Printf("[Scheduler] Task became available for work.")
+      s.Logger.Printf("Task became available for work.")
 
-      log.Printf("[Scheduler] Waiting for job to send to task.")
+      s.Logger.Printf("Waiting for job to send to task.")
       job := <-s.Queue
-      log.Printf("[Scheduler] Retrieved job.")
+      s.Logger.Printf("Retrieved job.")
 
       t.Jobs <- job
 
       s.ActiveTasks += 1
       s.WaitingJobs -= 1
     case <-time.After(3 * time.Second):
-      log.Printf("[Scheduler] No tasks have become available in the last %d seconds.", 3)
-      log.Printf("[Scheduler] Scaling up the number of available tasks by %d", 1)
+      s.Logger.Printf("No tasks have become available in the last %d seconds.", 3)
+      s.Logger.Printf("Scaling up the number of available tasks by %d", 1)
       if s.WaitingJobs != 0 {
         err := s.Scale(1)
         if err != nil {
@@ -130,7 +143,7 @@ func (s *Scheduler) Shutdown() {
 
     select {
     case t := <-s.Tasks:
-      log.Printf("[Scheduler] Stopping task.")
+      s.Logger.Printf("Stopping task.")
       t.Done <- true
     default:
     }
@@ -146,19 +159,15 @@ func (s *Scheduler) Shutdown() {
 func (s *Scheduler) Scale(n int) error {
   current := s.TotalTasks
 
-  log.Printf("[Scheduler] Scaling available tasks from %d to %d", current, current+n)
+  s.Logger.Printf("Scaling available tasks from %d to %d", current, current+n)
 
   for id := current; id < current+n; id++ {
-    task := &Task{
-      Jobs: make(chan *Job, 10),
-      Scheduler: s,
-    }
+    task := s.NewTask()
 
-    log.Printf("[Scheduler] Starting task.")
+    s.Logger.Printf("Starting task.")
     go task.Run()
 
     s.Tasks <- task
-    s.TotalTasks += 1
   }
 
   return nil
@@ -168,7 +177,7 @@ func (s *Scheduler) Scale(n int) error {
   Register a new worker.
 */
 func (s *Scheduler) RegisterWorker(name string, worker Worker) {
-  log.Printf("[Scheduler] Registered worker '%s'", name)
+  s.Logger.Printf("Registered worker '%s'", name)
   s.Registrar[name] = worker
 }
 
@@ -176,7 +185,7 @@ func (s *Scheduler) RegisterWorker(name string, worker Worker) {
   Create a new job.
 */
 func (s *Scheduler) NewJob(name string, ctx interface{}) *Job {
-  log.Printf("[Scheduler] Created job for '%s' worker.", name)
+  s.Logger.Printf("Created job for '%s' worker.", name)
   return &Job{
     Name: name,
     Context: ctx,
@@ -187,8 +196,21 @@ func (s *Scheduler) NewJob(name string, ctx interface{}) *Job {
   Schedule a job to be run
 */
 func (s *Scheduler) SubmitJob(job *Job) {
-  log.Printf("[Scheduler] Submitting job for distribution to a '%s' worker.", job.Name)
+  s.Logger.Printf("Submitting job for distribution to a '%s' worker.", job.Name)
   s.Queue <- job
+}
+
+/*
+  Create a new task.
+*/
+func (s *Scheduler) NewTask() *Task {
+  s.TotalTasks += 1
+
+  return &Task{
+    Jobs: make(chan *Job, 10),
+    Scheduler: s,
+    Logger: log.New(os.Stdout, "", LogFlags),
+  }
 }
 
 /*
@@ -196,51 +218,51 @@ func (s *Scheduler) SubmitJob(job *Job) {
   a job queue.
 */
 func (t *Task) Run() {
-  log.Printf("[Task] Started.")
+  t.Logger.Printf("Started.")
 
   registrar := t.Scheduler.Registrar
 
-  log.Printf("[Task] Waiting for jobs to become available.")
+  t.Logger.Printf("Waiting for jobs to become available.")
 
 	for job := range t.Jobs {
     select {
     case <-t.Done:
-      log.Printf("[Task] Stopping.")
+      t.Logger.Printf("Stopping.")
       t.Scheduler.TotalTasks -= 1
       break
     default:
     }
 
-    log.Printf("[Task] Retrieved a job for a '%s' worker. Distributing.", job.Name)
+    t.Logger.Printf("Retrieved a job for a '%s' worker. Distributing.", job.Name)
 
     worker := registrar[job.Name]
     output := worker(job.Context)
 
     if output == nil {
-      log.Printf("[Task] Output from worker was empty.")
+      t.Logger.Printf("Output from worker was empty.")
       continue
     }
 
-    log.Printf("[Task] Received output from worker.")
+    t.Logger.Printf("Received output from worker.")
 
     if output.Error != nil {
-      log.Printf("[Task] Worker '%s' generated an error during processing.", job.Name)
+      t.Logger.Printf("Worker '%s' generated an error during processing.", job.Name)
       log.Fatal(output.Error)
     }
 
     if len(output.Jobs) != 0 {
-      log.Printf("[Task] Worker returned %d jobs. Submitting them for distribution.", len(output.Jobs))
+      t.Logger.Printf("Worker returned %d jobs. Submitting them for distribution.", len(output.Jobs))
 
       for _, job := range output.Jobs {
         t.Jobs <- job
       }
     }
 
-    log.Printf("[Task] Completed Work.")
+    t.Logger.Printf("Completed Work.")
 
     t.Scheduler.Tasks <- t
     t.Scheduler.ActiveTasks -= 1
 	}
 
-  log.Printf("[Task] Done.")
+  t.Logger.Printf("Done.")
 }
