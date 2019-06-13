@@ -28,7 +28,8 @@ type RibbonFarmCrawlJob struct {
   Crawls through Ribbon Farm's pagination to get the title of every ribbonfarm post
 */
 func main() {
-  s, err := scheduler.New()
+  s := scheduler.New()
+  err := s.Start()
   if err != nil {
     log.Fatal(err)
   }

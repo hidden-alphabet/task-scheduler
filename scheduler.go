@@ -68,9 +68,8 @@ type Scheduler struct {
 /*
   Create a new scheduler. 
 */
-func New() (*Scheduler, error) {
-
-  scheduler := &Scheduler{
+func New() *Scheduler {
+  return &Scheduler{
     TotalTasks: 0,
     ActiveTasks: 0,
 
@@ -80,17 +79,23 @@ func New() (*Scheduler, error) {
 
     Logger: log.New(os.Stdout, "[Scheduler] ", LogFlags),
   }
+}
 
-  scheduler.Logger.Printf("Created Scheduler.")
+/*
+  Starts a scheduler
+*/
+func (s *Scheduler) Start() error {
+  s.Logger.Printf("Starting.")
 
-  go scheduler.Run()
+  go s.Run()
 
-  err := scheduler.Scale(1)
+  err := s.Scale(1)
   if err != nil {
-    return nil, err
+    s.Shutdown()
+    return err
   }
 
-	return scheduler, nil
+  return nil
 }
 
 /*
