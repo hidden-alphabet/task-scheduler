@@ -1,28 +1,23 @@
 package main
 
-// NOTE: While the task is good for driving API design, this
-// implementation is - by design - sequential, and can't make
-// use of the concurrency management offered by scheduler. Instead,
-// to better demonstrate the use case, we should have a second job
-// which gets the name of the first commenter for every post.
-
 import (
+  "io"
+  "os"
   "log"
-  "sync"
+  "fmt"
   "errors"
   "net/http"
   "github.com/PuerkitoBio/goquery"
- // "github.com/hidden-alphabet/scheduler"
+
   ".."
 )
 
-const RibbonFarmCrawlJobName = "RibbonFarmCrawlJobName"
-
 type RibbonFarmCrawlJob struct {
   URL string
-  Titles *[]string
-  Mutex *sync.Mutex
+  Output *os.File
 }
+
+const RibbonFarmCrawlJobName = "RibbonFarmCrawlJob"
 
 /*
   Crawls through Ribbon Farm's pagination to get the title of every ribbonfarm post
@@ -42,7 +37,7 @@ func main() {
 
     job, ok := ctx.(RibbonFarmCrawlJob)
     if !ok {
-      output.Error = errors.New("Unable to cast context to CrawlJob.")
+      output.Error = errors.New(fmt.Sprintf("Unable to cast context to '%s'.", RibbonFarmCrawlJobName))
       return output
     }
 
@@ -64,45 +59,45 @@ func main() {
 
     log.Printf("[Crawler] Parsing RibbonFarm Titles.")
 
-    document.Find("div.post").Each(func(i int, s *goquery.Selection) {
-      job.Mutex.Lock()
-      *job.Titles = append(*job.Titles, s.Text())
-      job.Mutex.Unlock()
+    document.Find("h2.entry-title").Find("a.entry-title-link").Each(func(i int, s *goquery.Selection) {
+      _, err := io.WriteString(job.Output, s.Text())
+      if err != nil {
+        log.Fatal(err)
+      }
+
+      _, err = io.WriteString(job.Output, "\n")
+      if err != nil {
+        log.Fatal(err)
+      }
     })
 
     log.Printf("[Crawler] Parsing RibbonFarm Links.")
 
     if link, exists := document.Find("div.navigation").Find("li.pagination-next").Find("a").Attr("href"); exists {
-
       log.Printf("[Crawler] Creating RibbonFarmCrawlJob To Parse: %s.", link)
 
-      crawlJob := s.NewJob(RibbonFarmCrawlJobName, RibbonFarmCrawlJob{
-        URL: link,
-        Titles: job.Titles,
-        Mutex: job.Mutex,
-      })
-
+      crawlJob := s.NewJob(RibbonFarmCrawlJobName, RibbonFarmCrawlJob{ Output: job.Output, URL: link })
       output.Jobs = append(output.Jobs, crawlJob)
+
+      log.Printf("[Crawler] Done.")
     } else {
       log.Printf("[Crawler] No Links Found.")
-
-      return output
     }
-
-    log.Printf("[Crawler] Done.")
 
     return output
   })
 
-  titles := []string{}
+  filename := "ribbonfarm.txt"
+  file, err := os.Create(filename)
+  if err != nil {
+    log.Fatal(err)
+  }
+  defer file.Close()
+
+  job := s.NewJob(RibbonFarmCrawlJobName, RibbonFarmCrawlJob{ Output: file, URL: "https://ribbonfarm.com" })
 
   log.Printf("[Crawler] Starting.")
-
-  s.SubmitJob(s.NewJob(RibbonFarmCrawlJobName, RibbonFarmCrawlJob{
-    URL: "https://ribbonfarm.com",
-    Titles: &titles,
-    Mutex: &sync.Mutex{},
-  }))
+  s.SubmitJob(job)
 
   <-s.Done
 }
