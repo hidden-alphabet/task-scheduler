@@ -247,7 +247,7 @@ func (t *Task) Run() {
 
     if output.Error != nil {
       t.Logger.Printf("Worker '%s' generated an error during processing.", job.Name)
-      log.Fatal(output.Error)
+      t.Logger.Fatal(output.Error)
     }
 
     if len(output.Jobs) != 0 {
@@ -262,7 +262,7 @@ func (t *Task) Run() {
 
     t.Scheduler.Tasks <- t
     t.Scheduler.ActiveTasks -= 1
-	}
+  }
 
   t.Logger.Printf("Done.")
 }
