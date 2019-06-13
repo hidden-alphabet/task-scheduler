@@ -102,18 +102,20 @@ func (s *Scheduler) Start() error {
   Start delegating jobs out to workers.
 */
 func (s *Scheduler) Run() error {
-  s.Logger.Printf("Started.")
-
   for {
+    s.Logger.Printf("Waiting Jobs: %d", s.WaitingJobs)
+    s.Logger.Printf("Active Workers: %d/%d", s.ActiveTasks, s.TotalTasks)
+
     select {
     case <-s.Done:
       s.Logger.Printf("Stopping.")
       break
     case t := <-s.Tasks:
       s.Logger.Printf("Task became available for work.")
-
       s.Logger.Printf("Waiting for job to send to task.")
+
       job := <-s.Queue
+
       s.Logger.Printf("Retrieved job.")
 
       t.Jobs <- job
@@ -123,6 +125,7 @@ func (s *Scheduler) Run() error {
     case <-time.After(3 * time.Second):
       s.Logger.Printf("No tasks have become available in the last %d seconds.", 3)
       s.Logger.Printf("Scaling up the number of available tasks by %d", 1)
+
       if s.WaitingJobs != 0 {
         err := s.Scale(1)
         if err != nil {
@@ -141,16 +144,18 @@ func (s *Scheduler) Run() error {
 func (s *Scheduler) Shutdown() {
   s.Done <- true
 
+  /*
+    Stop all running tasks.
+  */
   for {
-    if s.TotalTasks == 0 {
-      break
-    }
-
     select {
     case t := <-s.Tasks:
       s.Logger.Printf("Stopping task.")
       t.Done <- true
     default:
+      if s.TotalTasks == 0 {
+        break
+      }
     }
   }
 
@@ -263,10 +268,12 @@ func (t *Task) Run() {
       }
     }
 
-    t.Logger.Printf("Completed Work.")
+    t.Logger.Printf("Adding Self Back To Task Queue.")
 
     t.Scheduler.Tasks <- t
     t.Scheduler.ActiveTasks -= 1
+
+    t.Logger.Printf("Completed Work.")
   }
 
   t.Logger.Printf("Done.")
