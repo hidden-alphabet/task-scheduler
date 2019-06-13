@@ -122,7 +122,7 @@ func (s *Scheduler) Run() error {
 
       s.ActiveTasks += 1
       s.WaitingJobs -= 1
-    case <-time.After(3 * time.Second):
+    case <-time.After(1 * time.Second):
       s.Logger.Printf("No tasks have become available in the last %d seconds.", 3)
       s.Logger.Printf("Scaling up the number of available tasks by %d", 1)
 
