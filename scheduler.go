@@ -219,7 +219,7 @@ func (s *Scheduler) NewTask() *Task {
   return &Task{
     Jobs: make(chan *Job, 10),
     Scheduler: s,
-    Logger: log.New(os.Stdout, "", LogFlags),
+    Logger: log.New(os.Stdout, "[Task] ", LogFlags),
   }
 }
 
