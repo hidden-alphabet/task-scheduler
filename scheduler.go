@@ -187,7 +187,7 @@ func (s *Scheduler) Scale(n int) error {
   Register a new worker.
 */
 func (s *Scheduler) RegisterWorker(name string, worker Worker) {
-  s.Logger.Printf("Registered worker '%s'", name)
+  s.Logger.Printf("[Scheduler] Registering '%s' Worker.", name)
   s.Registrar[name] = worker
 }
 
@@ -234,37 +234,39 @@ func (t *Task) Run() {
 
   t.Logger.Printf("Waiting for jobs to become available.")
 
-	for job := range t.Jobs {
+  for job := range t.Jobs {
     select {
     case <-t.Done:
       t.Logger.Printf("Stopping.")
       t.Scheduler.TotalTasks -= 1
       break
     default:
-    }
+      t.Logger.Printf("Retrieved a job for a '%s' worker. Distributing.", job.Name)
 
-    t.Logger.Printf("Retrieved a job for a '%s' worker. Distributing.", job.Name)
+      worker := registrar[job.Name]
+      output := worker(job.Context)
 
-    worker := registrar[job.Name]
-    output := worker(job.Context)
+      if output == nil {
+        t.Logger.Printf("Output from worker was empty.")
+        continue
+      }
 
-    if output == nil {
-      t.Logger.Printf("Output from worker was empty.")
-      continue
-    }
+      t.Logger.Printf("Received output from worker.")
 
-    t.Logger.Printf("Received output from worker.")
+      if output.Error != nil {
+        t.Logger.Printf("Worker '%s' generated an error during processing.", job.Name)
+        t.Logger.Fatal(output.Error)
+      }
 
-    if output.Error != nil {
-      t.Logger.Printf("Worker '%s' generated an error during processing.", job.Name)
-      t.Logger.Fatal(output.Error)
-    }
+      if len(output.Jobs) != 0 {
+        t.Logger.Printf("Worker returned %d jobs. Submitting them for distribution.", len(output.Jobs))
 
-    if len(output.Jobs) != 0 {
-      t.Logger.Printf("Worker returned %d jobs. Submitting them for distribution.", len(output.Jobs))
+        for _, job := range output.Jobs {
+          t.Jobs <- job
+        }
 
-      for _, job := range output.Jobs {
-        t.Jobs <- job
+        t.Scheduler.Tasks <- t
+        t.Scheduler.ActiveTasks -= 1
       }
     }
 
