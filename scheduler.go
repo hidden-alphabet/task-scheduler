@@ -7,13 +7,6 @@ import (
 )
 
 /*
-  Global logging flags
-*/
-var (
-  LogFlags = log.Ldate | log.Lmicroseconds | log.Lshortfile
-)
-
-/*
   A WorkerOutput is the required output of a worker function 
 */
 type WorkerOutput struct {
@@ -28,258 +21,181 @@ type WorkerOutput struct {
 type Worker func(interface{}) *WorkerOutput
 
 /*
-  A Job is an arbitrary object for providing context to each 
-  worker during execution.
+A mapping from strings to functions
 */
-type Job struct {
-  Name string
-  Context interface{}
-}
+type Registry map[string]Worker
 
 /*
-  A Task is an object for managings goroutines. It provides each 
-  goroutine with a jobs queue to execute upon and access to its
-  supervising Scheduler object.
-*/
-type Task struct {
-  Done        chan bool
-  Jobs        chan *Job
-	Scheduler   *Scheduler
-
-  Logger *log.Logger
-}
-
-/*
-  Scheduler's manage a queue of goroutines, distributing work
-  to them when they become available. It keeps a count of the
-  number of total and active tasks at any given moment.
+  A Scheduler manages the distribution of jobs to inactive tasks. 
 */
 type Scheduler struct {
-  TotalTasks int
-  ActiveTasks int
-  WaitingJobs int
+  Jobs *Messenger
+  Tasks *Messenger
 
-  Queue chan *Job
-  Tasks chan *Task
-  Registrar map[string]Worker
+  Workers Registry
 
-  Done chan bool
+  Log *log.Logger
+  Verbose bool
 
-  Logger *log.Logger
+  ShouldStop chan bool
 }
 
 /*
-  Create a new scheduler. 
+  Creates a scheduler.
 */
-func New() *Scheduler {
-  return &Scheduler{
-    TotalTasks: 0,
-    ActiveTasks: 0,
+func NewScheduler(verbose bool) *Scheduler {
+  var logger *log.Logger
 
-    Queue: make(chan *Job, 10),
-    Tasks: make(chan *Task, 1000),
-    Registrar: make(map[string]Worker),
-
-    Logger: log.New(os.Stdout, "[Scheduler] ", LogFlags),
+  if verbose {
+    logger = log.New(os.Stdout, "[Scheduler] ", LogFlags)
   }
+
+  return &Scheduler{
+    Jobs: NewMessenger(),
+    Tasks: NewMessenger(),
+
+    Workers: make(Registry),
+
+    Log: logger,
+    Verbose: verbose,
+  }
+}
+
+func (s *Scheduler) Stop() {
+  s.ShouldStop <- true
+
+  s.Jobs.Flush()
+  s.Tasks.Flush()
 }
 
 /*
   Starts a scheduler
 */
 func (s *Scheduler) Start() error {
-  s.Logger.Printf("Starting.")
+  if s.Verbose {
+    s.Log.Printf("Starting.")
+  }
 
-  go s.Run()
-
-  err := s.Scale(1)
+  err := s.ScaleUpByN(1)
   if err != nil {
-    s.Shutdown()
+    s.Stop()
     return err
   }
 
-  return nil
-}
 
-/*
-  Start delegating jobs out to workers.
-*/
-func (s *Scheduler) Run() error {
   for {
-    s.Logger.Printf("Waiting Jobs: %d", s.WaitingJobs)
-    s.Logger.Printf("Active Workers: %d/%d", s.ActiveTasks, s.TotalTasks)
-
-    select {
-    case <-s.Done:
-      s.Logger.Printf("Stopping.")
-      break
-    case t := <-s.Tasks:
-      s.Logger.Printf("Task became available for work.")
-      s.Logger.Printf("Waiting for job to send to task.")
-
-      job := <-s.Queue
-
-      s.Logger.Printf("Retrieved job.")
-
-      t.Jobs <- job
-
-      s.ActiveTasks += 1
-      s.WaitingJobs -= 1
-    case <-time.After(1 * time.Second):
-      s.Logger.Printf("No tasks have become available in the last %d seconds.", 3)
-      s.Logger.Printf("Scaling up the number of available tasks by %d", 1)
-
-      if s.WaitingJobs != 0 {
-        err := s.Scale(1)
-        if err != nil {
-          return err
-        }
-      }
+    if s.Verbose {
+      s.Log.Printf("Idle Jobs: %d", s.Jobs.Count)
+      s.Log.Printf("Idle Tasks: %d", s.Tasks.Count)
     }
-  }
 
-  return nil
-}
 
-/*
-  Stop scheduler and all associated tasks.
-*/
-func (s *Scheduler) Shutdown() {
-  s.Done <- true
-
-  /*
-    Stop all running tasks.
-  */
-  for {
     select {
-    case t := <-s.Tasks:
-      s.Logger.Printf("Stopping task.")
-      t.Done <- true
-    default:
-      if s.TotalTasks == 0 {
+    /*
+      If we receive a 'Done' signal, kill the scheduler.
+    */
+    case <-s.ShouldStop:
+      goto Stop
+
+    /* 
+      1. Retrieve an inactive task, or fall through if one is not available
+      2. Retrieve an unprocessed job, or block until one is available
+      3. Send the unprocessed job to the task's job queue
+      4. Repeat
+    */
+  case item := <-s.Tasks.AsyncPop():
+      if s.Verbose {
+        s.Log.Printf("Waiting for job.")
+      }
+
+      task := toTask(item)
+      if task == nil {
+        s.Log.Printf("Unable to coerce the received item into a task")
         break
       }
+      task.Jobs.Push(s.Jobs.Pop())
+
+    /*
+      If no task has become available in the last second, and the number of waiting jobs
+      is non-zero, than there must not be enough of them, so increase the number of available
+      jobs by 1.
+    */
+    case <-time.After(1 * time.Second):
+      if s.Verbose {
+        s.Log.Printf("No tasks have become available in the last %d seconds.", 1)
+      }
+
+      var err error
+      if s.Jobs.Count != 0 {
+        err = s.ScaleUpByN(1)
+      } else {
+        err = s.ScaleDownByN(1)
+      }
+
+      if err != nil {
+        return err
+      }
     }
   }
 
-  close(s.Tasks)
-  close(s.Queue)
+  Stop:
+  return nil
 }
 
 /*
-  Increase the number of tasks available to do work by n. 
+  Increase the number of tasks by n. 
 */
-func (s *Scheduler) Scale(n int) error {
-  current := s.TotalTasks
+func (s *Scheduler) ScaleUpByN(n int) error {
+  taskCount := s.Tasks.Count
 
-  s.Logger.Printf("Scaling available tasks from %d to %d", current, current+n)
+  for id := taskCount; id < taskCount+n; id++ {
+    if s.Verbose {
+      s.Log.Printf("Starting task.")
+    }
 
-  for id := current; id < current+n; id++ {
-    task := s.NewTask()
+    task := NewTask(*s)
+    go task.Start()
 
-    s.Logger.Printf("Starting task.")
-    go task.Run()
+    s.Tasks.Push(task)
+  }
 
-    s.Tasks <- task
+  if s.Verbose {
+    s.Log.Printf("Scaled available tasks from %d to %d", taskCount, taskCount+n)
   }
 
   return nil
 }
 
 /*
-  Register a new worker.
+  Decrease the number of tasks by n
 */
-func (s *Scheduler) RegisterWorker(name string, worker Worker) {
-  s.Logger.Printf("[Scheduler] Registering '%s' Worker.", name)
-  s.Registrar[name] = worker
-}
+func (s *Scheduler) ScaleDownByN(n int) error {
+  taskCount := s.Tasks.Count
 
-/*
-  Create a new job.
-*/
-func (s *Scheduler) NewJob(name string, ctx interface{}) *Job {
-  s.Logger.Printf("Created job for '%s' worker.", name)
-  return &Job{
-    Name: name,
-    Context: ctx,
-  }
-}
-
-/*
-  Schedule a job to be run
-*/
-func (s *Scheduler) SubmitJob(job *Job) {
-  s.Logger.Printf("Submitting job for distribution to a '%s' worker.", job.Name)
-  s.Queue <- job
-}
-
-/*
-  Create a new task.
-*/
-func (s *Scheduler) NewTask() *Task {
-  s.TotalTasks += 1
-
-  return &Task{
-    Jobs: make(chan *Job, 10),
-    Scheduler: s,
-    Logger: log.New(os.Stdout, "[Task] ", LogFlags),
-  }
-}
-
-/*
-  Start a worker to listen for available work to be done from
-  a job queue.
-*/
-func (t *Task) Run() {
-  t.Logger.Printf("Started.")
-
-  registrar := t.Scheduler.Registrar
-
-  t.Logger.Printf("Waiting for jobs to become available.")
-
-  for job := range t.Jobs {
-    select {
-    case <-t.Done:
-      t.Logger.Printf("Stopping.")
-      t.Scheduler.TotalTasks -= 1
-      break
-    default:
-      t.Logger.Printf("Retrieved a job for a '%s' worker. Distributing.", job.Name)
-
-      worker := registrar[job.Name]
-      output := worker(job.Context)
-
-      if output == nil {
-        t.Logger.Printf("Output from worker was empty.")
-        continue
-      }
-
-      t.Logger.Printf("Received output from worker.")
-
-      if output.Error != nil {
-        t.Logger.Printf("Worker '%s' generated an error during processing.", job.Name)
-        t.Logger.Fatal(output.Error)
-      }
-
-      if len(output.Jobs) != 0 {
-        t.Logger.Printf("Worker returned %d jobs. Submitting them for distribution.", len(output.Jobs))
-
-        for _, job := range output.Jobs {
-          t.Jobs <- job
-        }
-
-        t.Scheduler.Tasks <- t
-        t.Scheduler.ActiveTasks -= 1
-      }
+  for id := taskCount; id < taskCount+n; id++ {
+    if s.Verbose {
+      s.Log.Printf("Stopping task.")
     }
 
-    t.Logger.Printf("Adding Self Back To Task Queue.")
-
-    t.Scheduler.Tasks <- t
-    t.Scheduler.ActiveTasks -= 1
-
-    t.Logger.Printf("Completed Work.")
+    item := s.Tasks.Pop()
+    task := toTask(item)
+    task.Stop()
   }
 
-  t.Logger.Printf("Done.")
+  if s.Verbose {
+    s.Log.Printf("Scaled available tasks from %d to %d", taskCount, taskCount-n)
+  }
+
+  return nil
+}
+
+/*
+  Register a worker.
+*/
+func (s *Scheduler) Register(name string, worker Worker) {
+  if s.Verbose {
+    s.Log.Printf("[Scheduler] Registering '%s' Worker.", name)
+  }
+
+  s.Workers[name] = worker
 }
