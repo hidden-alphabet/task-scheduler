@@ -17,21 +17,19 @@ type RibbonFarmCrawlJob struct {
   Output *os.File
 }
 
-const RibbonFarmCrawlJobName = "RibbonFarmCrawlJob"
+const (
+  RibbonFarmCrawlJobName = "RibbonFarmCrawlJob"
+)
 
 /*
   Crawls through Ribbon Farm's pagination to get the title of every ribbonfarm post
 */
 func main() {
-  s := scheduler.New()
-  err := s.Start()
-  if err != nil {
-    log.Fatal(err)
-  }
+  s := scheduler.NewScheduler(true)
 
   log.Printf("[Crawler] Registering RibbonFarmCrawlerJob Worker.")
 
-  s.RegisterWorker(RibbonFarmCrawlJobName, func(ctx interface{}) *scheduler.WorkerOutput {
+  s.Register(RibbonFarmCrawlJobName, func(ctx interface{}) *scheduler.WorkerOutput {
     output := &scheduler.WorkerOutput{}
 
     log.Printf("[Crawler] Started RibbonFarmCrawlJob Worker.")
@@ -77,7 +75,7 @@ func main() {
     if link, exists := document.Find("div.navigation").Find("li.pagination-next").Find("a").Attr("href"); exists {
       log.Printf("[Crawler] Creating RibbonFarmCrawlJob To Parse: %s.", link)
 
-      crawlJob := s.NewJob(RibbonFarmCrawlJobName, RibbonFarmCrawlJob{ Output: job.Output, URL: link })
+      crawlJob := scheduler.NewJob(RibbonFarmCrawlJobName, RibbonFarmCrawlJob{ Output: job.Output, URL: link })
       output.Jobs = append(output.Jobs, crawlJob)
 
       log.Printf("[Crawler] Done.")
@@ -95,10 +93,12 @@ func main() {
   }
   defer file.Close()
 
-  job := s.NewJob(RibbonFarmCrawlJobName, RibbonFarmCrawlJob{ Output: file, URL: "https://ribbonfarm.com" })
+  job := scheduler.NewJob(RibbonFarmCrawlJobName, RibbonFarmCrawlJob{ Output: file, URL: "https://ribbonfarm.com" })
 
   log.Printf("[Crawler] Starting.")
-  s.SubmitJob(job)
+  go s.Start()
 
-  <-s.Done
+  s.Jobs.Push(job)
+
+  <-s.ShouldStop
 }
