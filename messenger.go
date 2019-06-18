@@ -1,41 +1,43 @@
 package scheduler
 
 type Messenger struct {
-  Count int
-  Queue chan interface{}
+	Count        int
+	Queue chan interface{}
 }
 
 func NewMessenger() *Messenger {
-  return &Messenger{
-    Count: 0,
-    Queue: make(chan interface{}, 10000),
-  }
+	return &Messenger{
+		Count: 0,
+		Queue: make(chan interface{}, 10),
+	}
 }
 
 func (m *Messenger) Push(item interface{}) {
-  m.Queue <- item
-  m.Count += 1
+	m.Queue <- item
+	m.Count += 1
 }
 
 func (m *Messenger) Pop() interface{} {
-  item := <-m.Queue
-  m.Count -= 1
+	item := <-m.Queue
+	m.Count -= 1
 
-  return item
+	return item
 }
 
 func (m *Messenger) AsyncPop() chan interface{} {
-  tasks := make(chan interface{})
+	q := make(chan interface{})
 
-  go func(c chan interface{}) {
-    t := <-m.Queue
-    c <- t
-    m.Count -= 1
-  }(tasks)
+	go func(q chan interface{}) {
+		for item := range m.Queue {
+			q <- item
+			m.Count -= 1
+		}
+	}(q)
 
-  return tasks
+	return q
 }
 
 func (m *Messenger) Flush() {
-  for _ = range m.Queue {}
+	for range m.Queue {
+	}
 }

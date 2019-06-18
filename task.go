@@ -1,40 +1,41 @@
 package scheduler
 
 import (
-  "os"
-  "log"
+	"log"
+	"os"
+	"time"
 )
 
 /*
-  A Task is an object for managings goroutines. It provides each 
+  A Task is an object for managings goroutines. It provides each
   goroutine with a jobs queue to execute upon and access to its
   supervising Scheduler object.
 */
 type Task struct {
-  Jobs *Messenger
+	Jobs *Messenger
 
-  SchedulerJobs *Messenger
-  SchedulerTasks *Messenger
+	SchedulerJobs     *Messenger
+	SchedulerTasks    *Messenger
 	SchedulerRegistry *Registry
 
-  Log *log.Logger
+	Log *log.Logger
 
-  ShouldStop  chan bool
+	ShouldStop chan bool
 }
 
 /*
   Create a new task.
 */
 func NewTask(s Scheduler) *Task {
-  return &Task{
-    Jobs: NewMessenger(),
+	return &Task{
+		Jobs: NewMessenger(),
 
-    SchedulerJobs: s.Jobs,
-    SchedulerTasks: s.Tasks,
-    SchedulerRegistry: &s.Workers,
+		SchedulerJobs:     s.Jobs,
+		SchedulerTasks:    s.Tasks,
+		SchedulerRegistry: &s.Workers,
 
-    Log: log.New(os.Stdout, "[Task] ", LogFlags),
-  }
+		Log: log.New(os.Stdout, "[Task] ", LogFlags),
+	}
 }
 
 /*
@@ -42,61 +43,67 @@ func NewTask(s Scheduler) *Task {
   a job queue.
 */
 func (t *Task) Start() {
-  t.Log.Printf("Started.")
-  t.Log.Printf("Waiting for jobs to become available.")
+	t.Log.Printf("Started.")
 
-  /*
-    1. Wait until a job becomes available
-    2. If the task has received a 'ShouldStop' signal while
-       waiting, kill the process. 
-    3. Else, get the appropriate worker and yield the data to it
-       to process.
-  */
-  for {
-    item := t.Jobs.Pop()
-    job := toJob(item)
+	/*
+	   1. Wait until a job becomes available
+	   2. If the task has received a 'ShouldStop' signal while
+	      waiting, kill the process.
+	   3. Else, get the appropriate worker and yield the data to it
+	      to process.
+	*/
+	for {
+		t.Log.Printf("Waiting for jobs to become available.")
 
-    select {
-    case <-t.ShouldStop:
-      t.Log.Printf("Stopping.")
-      goto Stop
+		item := t.Jobs.Pop()
+		t.Log.Printf("Received job.")
+		job := toJob(item)
 
-    default:
-      t.Log.Printf("Retrieved a job for a '%s' worker. Distributing.", job.Name)
+		select {
+		case <-t.ShouldStop:
+			t.Log.Printf("Stopping.")
+			goto Stop
 
-      worker := (*t.SchedulerRegistry)[job.Name]
-      output := worker(job.Context)
+		case <-time.After(1 * time.Second):
+			t.Log.Printf("Haven't received any jobs in the last second.")
+			t.Stop()
 
-      if output == nil {
-        t.Log.Printf("Output from worker was empty.")
-      } else {
-        t.Log.Printf("Received output from worker.")
+		default:
+			t.Log.Printf("Retrieved a job for a '%s' worker. Processing.", job.Name)
 
-        if output.Error != nil {
-          t.Log.Printf("Worker '%s' generated an error during processing.", job.Name)
-          t.Log.Fatal(output.Error)
-        }
+			worker := (*t.SchedulerRegistry)[job.Name]
+			output := worker(job.Context)
 
-        if len(output.Jobs) != 0 {
-          t.Log.Printf("Worker returned %d jobs. Submitting them for distribution.", len(output.Jobs))
+			if output == nil {
+				t.Log.Printf("Output from worker was empty.")
+			} else {
+				t.Log.Printf("Received output from worker.")
 
-          for _, job := range output.Jobs {
-            t.SchedulerJobs.Push(job)
-          }
-        }
-      }
-    }
-    t.Log.Printf("Completed Work.")
-    t.Log.Printf("Adding Self Back To Task Queue.")
+				if output.Error != nil {
+					t.Log.Printf("Worker '%s' generated an error during processing.", job.Name)
+					t.Log.Fatal(output.Error)
+				}
 
-    t.SchedulerTasks.Push(t)
-  }
+				if len(output.Jobs) != 0 {
+					t.Log.Printf("Worker returned %d job(s). Submitting them for scheduling.", len(output.Jobs))
 
-  Stop:
-  t.Log.Printf("Stopping.")
+					for _, job := range output.Jobs {
+						t.SchedulerJobs.Push(job)
+					}
+				}
+			}
+		}
+		t.Log.Printf("Completed Work.")
+		t.Log.Printf("Adding Self Back To Task Queue.")
+
+		t.SchedulerTasks.Push(t)
+	}
+
+Stop:
+	t.Log.Printf("Exiting.")
 }
 
 func (t *Task) Stop() {
-  t.ShouldStop <- true
-  t.Jobs.Flush()
+	t.ShouldStop <- true
+	t.Jobs.Flush()
 }

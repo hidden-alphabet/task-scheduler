@@ -1,31 +1,31 @@
 package scheduler
 
 import (
-  "os"
-  "fmt"
-  "log"
+	"fmt"
+	"log"
+	"os"
 )
 
 /*
-  A Job is an arbitrary object for providing context to each 
+  A Job is an arbitrary object for providing context to each
   worker during execution.
 */
 type Job struct {
-  Name string
-  Context interface{}
+	Name    string
+	Context interface{}
 
-  Logger *log.Logger
+	Logger *log.Logger
 }
 
 /*
   Create a new job.
 */
 func NewJob(name string, ctx interface{}) *Job {
-  job := &Job{
-    Name: name,
-    Context: ctx,
-    Logger: log.New(os.Stdout, fmt.Sprintf("[%s] ", name), LogFlags),
-  }
+	job := &Job{
+		Name:    name,
+		Context: ctx,
+		Logger:  log.New(os.Stdout, fmt.Sprintf("[%s] ", name), LogFlags),
+	}
 
-  return job
+	return job
 }
