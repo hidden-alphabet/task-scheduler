@@ -1,43 +1,53 @@
 package scheduler
 
-type Messenger struct {
-	Count        int
-	Queue chan interface{}
+type Messenger interface {
+  Pop() interface{}
+  PopFuture() <-chan interface{}
+
+  Push(interface{})
+  PushFuture(interface{})
 }
 
-func NewMessenger() *Messenger {
-	return &Messenger{
+type CountingChan struct {
+	Count int
+	Queue chan interface{}
+
+  FutureQueue *chan interface{}
+}
+
+func NewCountingChan() *CountingChan {
+	return &CountingChan{
 		Count: 0,
-		Queue: make(chan interface{}, 10),
+		Queue: make(chan interface{}, 1000),
 	}
 }
 
-func (m *Messenger) Push(item interface{}) {
-	m.Queue <- item
-	m.Count += 1
+func (cc *CountingChan) Push(item interface{}) {
+	cc.Queue <- item
+	cc.Count += 1
 }
 
-func (m *Messenger) Pop() interface{} {
-	item := <-m.Queue
-	m.Count -= 1
+func (cc *CountingChan) Pop() interface{} {
+	item := <-cc.Queue
+	cc.Count -= 1
 
 	return item
 }
 
-func (m *Messenger) AsyncPop() chan interface{} {
-	q := make(chan interface{})
+func (cc *CountingChan) PopFuture() chan interface{} {
+  if cc.FutureQueue == nil {
+    q := make(chan interface{}, 1)
+    cc.FutureQueue = &q
+  }
 
-	go func(q chan interface{}) {
-		for item := range m.Queue {
-			q <- item
-			m.Count -= 1
-		}
-	}(q)
+  go func(queue chan interface{}) {
+      queue <- cc.Pop()
+  }(*cc.FutureQueue)
 
-	return q
+	return *(cc.FutureQueue)
 }
 
-func (m *Messenger) Flush() {
-	for range m.Queue {
+func (cc *CountingChan) Flush() {
+	for range cc.Queue {
 	}
 }

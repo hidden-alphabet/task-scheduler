@@ -8,10 +8,3 @@ func toTask(ptr interface{}) *Task {
 	return nil
 }
 
-func toJob(ptr interface{}) *Job {
-	if j, ok := ptr.(*Job); ok {
-		return j
-	}
-
-	return nil
-}

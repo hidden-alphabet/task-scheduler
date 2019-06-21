@@ -29,14 +29,14 @@ func main() {
 
 	log.Printf("[Crawler] Registering RibbonFarmCrawlerJob Worker.")
 
-	s.Register(RibbonFarmCrawlJobName, func(ctx interface{}) *scheduler.WorkerOutput {
-		output := &scheduler.WorkerOutput{}
+	s.Register(RibbonFarmCrawlJobName, func(ctx interface{}) *scheduler.Result {
+		output := &scheduler.Result{}
 
 		log.Printf("[Crawler] Started RibbonFarmCrawlJob Worker.")
 
 		job, ok := ctx.(RibbonFarmCrawlJob)
 		if !ok {
-			output.Error = errors.New(fmt.Sprintf("Unable to cast context to '%s'.", RibbonFarmCrawlJobName))
+			output.Err = errors.New(fmt.Sprintf("Unable to cast context to '%s'.", RibbonFarmCrawlJobName))
 			return output
 		}
 
@@ -44,7 +44,7 @@ func main() {
 
 		res, err := http.Get(job.URL)
 		if err != nil {
-			output.Error = err
+			output.Err = err
 			return output
 		}
 
@@ -52,7 +52,7 @@ func main() {
 
 		document, err := goquery.NewDocumentFromReader(res.Body)
 		if err != nil {
-			output.Error = err
+			output.Err = err
 			return output
 		}
 
