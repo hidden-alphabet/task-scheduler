@@ -1,18 +1,18 @@
 package scheduler
 
 type Messenger interface {
-  Pop() interface{}
-  PopFuture() <-chan interface{}
+	Pop() interface{}
+	PopFuture() <-chan interface{}
 
-  Push(interface{})
-  PushFuture(interface{})
+	Push(interface{})
+	PushFuture(interface{})
 }
 
 type CountingChan struct {
 	Count int
 	Queue chan interface{}
 
-  FutureQueue *chan interface{}
+	FutureQueue *chan interface{}
 }
 
 func NewCountingChan() *CountingChan {
@@ -35,14 +35,14 @@ func (cc *CountingChan) Pop() interface{} {
 }
 
 func (cc *CountingChan) PopFuture() chan interface{} {
-  if cc.FutureQueue == nil {
-    q := make(chan interface{}, 1)
-    cc.FutureQueue = &q
-  }
+	if cc.FutureQueue == nil {
+		q := make(chan interface{}, 1)
+		cc.FutureQueue = &q
+	}
 
-  go func(queue chan interface{}) {
-      queue <- cc.Pop()
-  }(*cc.FutureQueue)
+	go func(queue chan interface{}) {
+		queue <- cc.Pop()
+	}(*cc.FutureQueue)
 
 	return *(cc.FutureQueue)
 }

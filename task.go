@@ -36,7 +36,7 @@ func NewTask(s Scheduler) *Task {
 
 		Log: log.New(os.Stdout, "[Task] ", LogFlags),
 
-    ShouldStop: make(chan bool, 1),
+		ShouldStop: make(chan bool, 1),
 	}
 }
 
@@ -57,44 +57,44 @@ func (t *Task) Start() {
 	for {
 		t.Log.Printf("Waiting for jobs to become available.")
 
-    select {
-    case <-time.After(1 * time.Second):
-      t.Log.Printf("Haven't received any jobs in the last second.")
-      t.Log.Printf("Stopping.")
-      goto Stop
+		select {
+		case <-time.After(1 * time.Second):
+			t.Log.Printf("Haven't received any jobs in the last second.")
+			t.Log.Printf("Stopping.")
+			goto Stop
 
-    case item, ok := <-t.Jobs.PopFuture():
-      if job := toJob(item); ok && job != nil {
-        t.Log.Printf("Retrieved a job for a '%s' worker. Processing.", job.Name)
+		case item, ok := <-t.Jobs.PopFuture():
+			if job := toJob(item); ok && job != nil {
+				t.Log.Printf("Retrieved a job for a '%s' worker. Processing.", job.Name)
 
-        worker := (*t.SchedulerRegistry)[job.Name]
-        output := worker(job.Context)
+				worker := (*t.SchedulerRegistry)[job.Name]
+				output := worker(job.Context)
 
-        if output == nil {
-          t.Log.Printf("No output from worker.")
-        } else {
-          if output.Err != nil {
-            t.Log.Printf("Worker '%s' got an error while processing.", job.Name)
-            t.Log.Printf("[Error] %s", output.Err)
-          }
+				if output == nil {
+					t.Log.Printf("No output from worker.")
+				} else {
+					if output.Err != nil {
+						t.Log.Printf("Worker '%s' got an error while processing.", job.Name)
+						t.Log.Printf("[Error] %s", output.Err)
+					}
 
-          if len(output.Jobs) != 0 {
-            t.Log.Printf("Got %d job(s). Submitting.", len(output.Jobs))
+					if len(output.Jobs) != 0 {
+						t.Log.Printf("Got %d job(s). Submitting.", len(output.Jobs))
 
-            for _, job := range output.Jobs {
-              t.SchedulerJobs.Push(job)
-            }
-          }
-        }
-      } else {
-        t.Log.Printf("Unable to coerce popped object to a 'Job' struct")
-      }
+						for _, job := range output.Jobs {
+							t.SchedulerJobs.Push(job)
+						}
+					}
+				}
+			} else {
+				t.Log.Printf("Unable to coerce popped object to a 'Job' struct")
+			}
 
-      t.Log.Printf("Completed Work.")
-    }
+			t.Log.Printf("Completed Work.")
+		}
 
 		t.SchedulerTasks.Push(t)
-    t.Log.Printf("Added Self Back To Task Queue.")
+		t.Log.Printf("Added Self Back To Task Queue.")
 	}
 
 Stop:

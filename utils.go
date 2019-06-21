@@ -7,4 +7,3 @@ func toTask(ptr interface{}) *Task {
 
 	return nil
 }
-

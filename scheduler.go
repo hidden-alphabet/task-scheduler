@@ -10,8 +10,8 @@ import (
   A Result is the output of a worker function
 */
 type Result struct {
-	Jobs  []*Job
-	Err error
+	Jobs []*Job
+	Err  error
 }
 
 /*
@@ -120,55 +120,55 @@ func (s *Scheduler) Start() error {
 		return err
 	}
 
-  for {
-    select {
-    /*
-      If no task has become available in the last second, and the number of waiting jobs
-      is non-zero, than there must not be enough of them, so increase the number of available
-      jobs by 1.
-    */
-    case <-time.After(4 * time.Second):
-      if s.Verbose {
-        s.Log.Printf("No tasks have become available in the last %d seconds.", 4)
-      }
+	for {
+		select {
+		/*
+		   If no task has become available in the last second, and the number of waiting jobs
+		   is non-zero, than there must not be enough of them, so increase the number of available
+		   jobs by 1.
+		*/
+		case <-time.After(4 * time.Second):
+			if s.Verbose {
+				s.Log.Printf("No tasks have become available in the last %d seconds.", 4)
+			}
 
-      if s.Tasks.Count < s.Jobs.Count {
-        err := s.ScaleUpByN(1)
-        if err != nil {
-          return err
-        }
-      }
+			if s.Tasks.Count < s.Jobs.Count {
+				err := s.ScaleUpByN(1)
+				if err != nil {
+					return err
+				}
+			}
 
-    /*
-      1. Retrieve an inactive task, or fall through if one is not available
-      2. Retrieve an unprocessed job, or block until one is available
-      3. Send the unprocessed job to the task's job queue
-      4. Repeat
-    */
-    case item, ok := <-s.Tasks.PopFuture():
-      if s.Verbose && ok {
-        if s.Verbose {
-          s.Log.Printf("Waiting for job.")
-        }
+		/*
+		   1. Retrieve an inactive task, or fall through if one is not available
+		   2. Retrieve an unprocessed job, or block until one is available
+		   3. Send the unprocessed job to the task's job queue
+		   4. Repeat
+		*/
+		case item, ok := <-s.Tasks.PopFuture():
+			if s.Verbose && ok {
+				if s.Verbose {
+					s.Log.Printf("Waiting for job.")
+				}
 
-        job := s.Jobs.Pop()
-        if s.Verbose {
-          s.Log.Printf("Retrieved job.")
-        }
+				job := s.Jobs.Pop()
+				if s.Verbose {
+					s.Log.Printf("Retrieved job.")
+				}
 
-        task := toTask(item)
-        if task == nil {
-          s.Log.Printf("Unable to coerce the received item into a task")
-          break
-        }
+				task := toTask(item)
+				if task == nil {
+					s.Log.Printf("Unable to coerce the received item into a task")
+					break
+				}
 
-        if s.Verbose {
-          s.Log.Printf("Sending job to task.")
-        }
-        task.Jobs.Push(job)
-      }
-    }
-  }
+				if s.Verbose {
+					s.Log.Printf("Sending job to task.")
+				}
+				task.Jobs.Push(job)
+			}
+		}
+	}
 
-  return nil
+	return nil
 }
