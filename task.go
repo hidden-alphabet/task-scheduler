@@ -12,10 +12,10 @@ import (
   supervising Scheduler object.
 */
 type Task struct {
-	Jobs *Messenger
+	Jobs *CountingChan
 
-	SchedulerJobs     *Messenger
-	SchedulerTasks    *Messenger
+	SchedulerJobs     *CountingChan
+	SchedulerTasks    *CountingChan
 	SchedulerRegistry *Registry
 
 	Log *log.Logger
@@ -28,13 +28,15 @@ type Task struct {
 */
 func NewTask(s Scheduler) *Task {
 	return &Task{
-		Jobs: NewMessenger(),
+		Jobs: NewCountingChan(),
 
 		SchedulerJobs:     s.Jobs,
 		SchedulerTasks:    s.Tasks,
 		SchedulerRegistry: &s.Workers,
 
 		Log: log.New(os.Stdout, "[Task] ", LogFlags),
+
+    ShouldStop: make(chan bool, 1),
 	}
 }
 
@@ -55,55 +57,54 @@ func (t *Task) Start() {
 	for {
 		t.Log.Printf("Waiting for jobs to become available.")
 
-		item := t.Jobs.Pop()
-		t.Log.Printf("Received job.")
-		job := toJob(item)
+    select {
+    case <-time.After(1 * time.Second):
+      t.Log.Printf("Haven't received any jobs in the last second.")
+      t.Log.Printf("Stopping.")
+      goto Stop
 
-		select {
-		case <-t.ShouldStop:
-			t.Log.Printf("Stopping.")
-			goto Stop
+    case item, ok := <-t.Jobs.PopFuture():
+      if job := toJob(item); ok && job != nil {
+        t.Log.Printf("Retrieved a job for a '%s' worker. Processing.", job.Name)
 
-		case <-time.After(1 * time.Second):
-			t.Log.Printf("Haven't received any jobs in the last second.")
-			t.Stop()
+        worker := (*t.SchedulerRegistry)[job.Name]
+        output := worker(job.Context)
 
-		default:
-			t.Log.Printf("Retrieved a job for a '%s' worker. Processing.", job.Name)
+        if output == nil {
+          t.Log.Printf("No output from worker.")
+        } else {
+          if output.Err != nil {
+            t.Log.Printf("Worker '%s' got an error while processing.", job.Name)
+            t.Log.Printf("[Error] %s", output.Err)
+          }
 
-			worker := (*t.SchedulerRegistry)[job.Name]
-			output := worker(job.Context)
+          if len(output.Jobs) != 0 {
+            t.Log.Printf("Got %d job(s). Submitting.", len(output.Jobs))
 
-			if output == nil {
-				t.Log.Printf("Output from worker was empty.")
-			} else {
-				t.Log.Printf("Received output from worker.")
+            for _, job := range output.Jobs {
+              t.SchedulerJobs.Push(job)
+            }
+          }
+        }
+      } else {
+        t.Log.Printf("Unable to coerce popped object to a 'Job' struct")
+      }
 
-				if output.Error != nil {
-					t.Log.Printf("Worker '%s' generated an error during processing.", job.Name)
-					t.Log.Fatal(output.Error)
-				}
-
-				if len(output.Jobs) != 0 {
-					t.Log.Printf("Worker returned %d job(s). Submitting them for scheduling.", len(output.Jobs))
-
-					for _, job := range output.Jobs {
-						t.SchedulerJobs.Push(job)
-					}
-				}
-			}
-		}
-		t.Log.Printf("Completed Work.")
-		t.Log.Printf("Adding Self Back To Task Queue.")
+      t.Log.Printf("Completed Work.")
+    }
 
 		t.SchedulerTasks.Push(t)
+    t.Log.Printf("Added Self Back To Task Queue.")
 	}
 
 Stop:
 	t.Log.Printf("Exiting.")
 }
 
-func (t *Task) Stop() {
-	t.ShouldStop <- true
-	t.Jobs.Flush()
+func toJob(ptr interface{}) *Job {
+	if j, ok := ptr.(*Job); ok {
+		return j
+	}
+
+	return nil
 }
