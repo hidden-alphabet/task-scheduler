@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"os"
 
-	".."
+	"github.com/lambda-labs-13-stock-price-2/task-scheduler"
 )
 
 type RibbonFarmCrawlJob struct {
