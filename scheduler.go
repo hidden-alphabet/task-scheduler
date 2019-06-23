@@ -114,7 +114,7 @@ func (s *Scheduler) Start() error {
 		s.Log.Printf("Starting.")
 	}
 
-	err := s.ScaleUpByN(1)
+	err := s.ScaleUpByN(2)
 	if err != nil {
 		s.Stop()
 		return err
@@ -127,7 +127,7 @@ func (s *Scheduler) Start() error {
 		   is non-zero, than there must not be enough of them, so increase the number of available
 		   jobs by 1.
 		*/
-		case <-time.After(4 * time.Second):
+		case <-time.After(0.1 * time.Second):
 			if s.Verbose {
 				s.Log.Printf("No tasks have become available in the last %d seconds.", 4)
 			}
